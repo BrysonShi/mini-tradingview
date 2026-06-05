@@ -72,9 +72,10 @@ def load_symbols() -> list[dict]:
 
 
 # 周期配置：(Period 枚举, 输出键, 拉取根数)
+# 注意：longport 3.0.23 的 Period 枚举是 Min_5/Min_15/Min_60/Day（没有 Hour 也没有 Min_30 这种"边界"枚举）
 PERIOD_CONFIG = [
-    (Period.Day,   "1d",  500),
-    (Period.Hour,  "1h",  500),
+    (Period.Day,    "1d",  500),
+    (Period.Min_60, "1h",  500),
     (Period.Min_15, "15m", 500),
     (Period.Min_5,  "5m",  500),
 ]
