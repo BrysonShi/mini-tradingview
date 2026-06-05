@@ -1,0 +1,95 @@
+name: Diag 401004
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diag:
+    name: 401004 根因诊断
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: 安装 longport
+        run: pip install "longport>=3.0.0,<4.0.0"
+      - name: 跑诊断（不打印 secrets 明文）
+        env:
+          LONGPORT_APP_KEY: ${{ secrets.LONGPORT_APP_KEY }}
+          LONGPORT_APP_SECRET: ${{ secrets.LONGPORT_APP_SECRET }}
+          LONGPORT_ACCESS_TOKEN: ${{ secrets.LONGPORT_ACCESS_TOKEN }}
+          # 显式指定 region，看 4 个组合哪个能通
+          LONGPORT_REGION: ${{ github.event.inputs.region || 'cn' }}
+        run: |
+          cat > /tmp/diag.py << 'PYEOF'
+          import os, sys, json, hashlib, base64, traceback
+
+          def safe_show(v):
+              if not v: return {"len": 0, "sha": "(empty)"}
+              return {"len": len(v), "sha": hashlib.sha256(v.encode()).hexdigest()[:16],
+                      "starts": v[:8], "ends": v[-4:]}
+
+          app_key = os.environ.get("LONGPORT_APP_KEY", "")
+          app_secret = os.environ.get("LONGPORT_APP_SECRET", "")
+          access_token = os.environ.get("LONGPORT_ACCESS_TOKEN", "")
+
+          print("=" * 60)
+          print("LONGPORT 401004 诊断")
+          print("=" * 60)
+          print(f"\n[1] env 三件套（不打印原值）")
+          print(f"  LONGPORT_APP_KEY      : {safe_show(app_key)}")
+          print(f"  LONGPORT_APP_SECRET   : {safe_show(app_secret)}")
+          print(f"  LONGPORT_ACCESS_TOKEN : {safe_show(access_token)}")
+          print(f"  LONGPORT_REGION       : {os.environ.get('LONGPORT_REGION', '(unset)')}")
+          print(f"  LONGPORT_HTTP_URL     : {os.environ.get('LONGPORT_HTTP_URL', '(unset)')}")
+
+          # 解 JWT
+          try:
+              payload_b64 = access_token.split(".")[1]
+              pad = "=" * (-len(payload_b64) % 4)
+              payload = json.loads(base64.urlsafe_b64decode(payload_b64 + pad))
+              interesting = ["iss","sub","aud","exp","iat","nbf","ak","aaid","acm","mid","sid","bl","ul","iks","region"]
+              compact = {k: payload.get(k) for k in interesting if k in payload}
+              print(f"\n[2] token JWT payload 关键字段")
+              print(json.dumps(compact, ensure_ascii=False, indent=2))
+              if "ak" in compact:
+                  m = "✅ 一致" if compact["ak"] == app_key else "❌ 不一致"
+                  print(f"  token.ak vs LONGPORT_APP_KEY : {m}")
+              if "exp" in compact:
+                  import time
+                  remain = compact["exp"] - int(time.time())
+                  print(f"  token.exp 剩余: {remain/86400:.1f} 天")
+              # token 自身的 iss 笔误检查
+              if "iss" in compact:
+                  iss = compact["iss"]
+                  if iss == "lonbridge":
+                      print(f"  ⚠️ token.iss = 'lonbridge' (少了 g, 应是 'longbridge')")
+                  elif iss == "longbridge":
+                      print(f"  token.iss = 'longbridge' ✅")
+          except Exception as e:
+              print(f"  JWT 解码失败: {e}")
+
+          print(f"\n[3] 构造 QuoteContext 触发服务端鉴权")
+          from longport.openapi import Config, QuoteContext
+          cfg = Config(
+              app_key=app_key,
+              app_secret=app_secret,
+              access_token=access_token,
+          )
+          try:
+              ctx = QuoteContext(cfg)
+              print("  ✅ 构造成功（没 401004）")
+          except Exception as e:
+              print(f"  ❌ 构造失败: {type(e).__module__}.{type(e).__name__}")
+              print(f"  message: {e}")
+              print(f"\n  __dict__: {e.__dict__}")
+              for attr in ("code","trace_id","traceId","msg","message","status","http_status","body","raw"):
+                  if hasattr(e, attr):
+                      v = getattr(e, attr)
+                      if v: print(f"  e.{attr} = {v!r}")
+              # 退栈回溯到网络层
+              print(f"\n  traceback:")
+              traceback.print_exc()
+          PYEOF
+          python3 /tmp/diag.py
