@@ -1,0 +1,84 @@
+name: Diag 401004 v2
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diag-endpoints:
+    name: 试 4 个端点 + 解析 JWT
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: 安装 longport
+        run: pip install "longport>=3.0.0,<4.0.0"
+      - name: 试 4 个端点
+        env:
+          LONGPORT_APP_KEY: ${{ secrets.LONGPORT_APP_KEY }}
+          LONGPORT_APP_SECRET: ${{ secrets.LONGPORT_APP_SECRET }}
+          LONGPORT_ACCESS_TOKEN: ${{ secrets.LONGPORT_ACCESS_TOKEN }}
+        run: |
+          cat > /tmp/diag2.py << 'PYEOF'
+          import os, sys, json, hashlib, base64, traceback
+
+          def safe_show(v):
+              if not v: return {"len": 0, "sha": "(empty)"}
+              return {"len": len(v), "sha": hashlib.sha256(v.encode()).hexdigest()[:16],
+                      "starts": v[:8], "ends": v[-4:]}
+
+          app_key = os.environ.get("LONGPORT_APP_KEY", "")
+          app_secret = os.environ.get("LONGPORT_APP_SECRET", "")
+          access_token = os.environ.get("LONGPORT_ACCESS_TOKEN", "")
+
+          print("=" * 70)
+          print("LONGPORT 401004 端点矩阵测试")
+          print("=" * 70)
+
+          # 1. JWT decode
+          try:
+              payload_b64 = access_token.split(".")[1]
+              pad = "=" * (-len(payload_b64) % 4)
+              payload = json.loads(base64.urlsafe_b64decode(payload_b64 + pad))
+              print(f"\n[A] token JWT 关键字段")
+              for k in ["iss", "sub", "aud", "exp", "ak", "aaid", "acm", "mid", "iks"]:
+                  if k in payload:
+                      print(f"  {k:8s} = {payload[k]}")
+              print(f"  token.ak vs LONGPORT_APP_KEY : {'✅ 一致' if payload.get('ak') == app_key else '❌ 不一致'}")
+          except Exception as e:
+              print(f"  JWT 解码失败: {e}")
+
+          # 2. 试 4 个端点（用 SDK）
+          from longport.openapi import Config, QuoteContext
+
+          endpoints = [
+              ("https://openapi.longportapp.com", "longport.com 默认(国际)"),
+              ("https://openapi.longportapp.cn", "longport.cn 国内"),
+              ("https://openapi.longbridge.com", "longbridge.com 国际(新)"),
+              ("https://openapi.longbridge.cn", "longbridge.cn 国内(新)"),
+          ]
+
+          for url, label in endpoints:
+              print(f"\n[B] 端点: {label} ({url})")
+              try:
+                  cfg = Config(
+                      app_key=app_key,
+                      app_secret=app_secret,
+                      access_token=access_token,
+                      http_url=url,
+                  )
+                  ctx = QuoteContext(cfg)
+                  print(f"  ✅ 构造成功！")
+                  # 顺便发个 quote 请求验证
+                  try:
+                      quote = ctx.quote(["AAPL.US"])
+                      print(f"  ✅ AAPL.US quote 成功: {quote[0].symbol} = {quote[0].last_done}")
+                  except Exception as e:
+                      print(f"  ⚠️ 构造成功但 quote 失败: {e}")
+              except Exception as e:
+                  msg = str(e)
+                  print(f"  ❌ 401004? {e.code if hasattr(e, 'code') else '?'}  trace_id={e.trace_id if hasattr(e, 'trace_id') else '?'}")
+                  print(f"     {e.message if hasattr(e, 'message') else msg}")
+          PYEOF
+          python3 /tmp/diag2.py 2>&1
