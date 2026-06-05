@@ -1,0 +1,79 @@
+name: Fetch Mini TradingView
+
+on:
+  # 每日 06:00 北京时间（22:00 UTC 前一天）拉取夜盘清单（覆盖美股盘后/港股夜盘当日新增）
+  schedule:
+    - cron: "0 22 * * *"
+  # 工作日 21:00 北京时间（13:00 UTC）拉取 K 线
+    - cron: "0 13 * * 1-5"
+  # 允许手动触发
+  workflow_dispatch:
+  # 推送触发：symbols.json / 任一脚本变化时重跑
+  push:
+    paths:
+      - "data/symbols.json"
+      - "data/symbols.example.json"
+      - "scripts/**"
+      - ".github/workflows/fetch.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  fetch-securities:
+    name: 拉取夜盘标的清单
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 安装依赖
+        run: pip install -r requirements.txt
+
+      - name: 拉取夜盘清单（US/HK/CN）
+        env:
+          LONGPORT_APP_KEY: ${{ secrets.LONGPORT_APP_KEY }}
+          LONGPORT_APP_SECRET: ${{ secrets.LONGPORT_APP_SECRET }}
+          LONGPORT_ACCESS_TOKEN: ${{ secrets.LONGPORT_ACCESS_TOKEN }}
+        run: python scripts/fetch_securities.py
+
+      - name: 提交更新
+        run: |
+          git config user.email "bryson-agent@users.noreply.github.com"
+          git config user.name "Bryson Agent"
+          git add data/securities.json
+          git diff --staged --quiet || git commit -m "chore: 更新夜盘标的清单"
+          git push
+
+  fetch-klines:
+    name: 拉取 K 线数据
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 安装依赖
+        run: pip install -r requirements.txt
+
+      - name: 拉取 K 线
+        env:
+          LONGPORT_APP_KEY: ${{ secrets.LONGPORT_APP_KEY }}
+          LONGPORT_APP_SECRET: ${{ secrets.LONGPORT_APP_SECRET }}
+          LONGPORT_ACCESS_TOKEN: ${{ secrets.LONGPORT_ACCESS_TOKEN }}
+        run: python scripts/fetch_klines.py
+
+      - name: 提交更新
+        run: |
+          git config user.email "bryson-agent@users.noreply.github.com"
+          git config user.name "Bryson Agent"
+          git add data/klines.json
+          git diff --staged --quiet || git commit -m "chore: 更新 K 线数据"
+          git push

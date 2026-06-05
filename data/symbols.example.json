@@ -1,0 +1,23 @@
+{
+  "_说明": [
+    "这是 symbols.json 的示例文件。复制本文件为 symbols.json，按需添加你要追踪的标的。",
+    "",
+    "格式：数组，每个元素是一个对象，必填 ticker，可选 name/type/market。",
+    "ticker 必须使用长桥（LongPort）支持的格式：",
+    "  - 美股: 直接用 ticker，如 AAPL / TSLA / NVDA",
+    "  - 港股: 5 位数字代码，如 00700.HK / 09988.HK",
+    "  - A 股: 6 位数字 + .SH（上交所）或 .SZ（深交所），如 600519.SH / 000001.SZ",
+    "  - 加密货币: 如 BTCUSD / ETHUSD（长桥支持的部分币种）",
+    "",
+    "name 仅作显示用，可不填。type 影响 KLineCharts 上的图标类型（stock/forex/crypto/futures/index/bond/fund/option）。",
+    "",
+    "修改后 commit 推送，GitHub Actions 会在每个工作日 21:00 北京时间拉取并写入 data/klines.json。"
+  ],
+  "examples": [
+    { "ticker": "AAPL",   "name": "苹果",           "type": "stock" },
+    { "ticker": "TSLA",   "name": "特斯拉",          "type": "stock" },
+    { "ticker": "00700.HK", "name": "腾讯控股",      "type": "stock" },
+    { "ticker": "600519.SH", "name": "贵州茅台",     "type": "stock" },
+    { "ticker": "BTCUSD", "name": "比特币",          "type": "crypto" }
+  ]
+}

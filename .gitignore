@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.env
+.DS_Store
+
+# 运行时数据（由 GitHub Actions 生成）
+# 保留 data/securities.json 和 data/klines.json 进 git 方便 Pages 静态加载
