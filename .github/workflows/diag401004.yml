@@ -1,0 +1,113 @@
+name: diag401004
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show longport SDK version
+        run: |
+          python -m pip install -q 'longport>=3.0.0,<4.0.0'
+          python -c "from importlib.metadata import version; print('longport sdk version =', version('longport'))"
+
+      - name: Show credentials length + SHA256 (masked)
+        run: |
+          python3 << 'EOF'
+          import hashlib, os
+          for k in ("LONGPORT_APP_KEY", "LONGPORT_APP_SECRET", "LONGPORT_ACCESS_TOKEN"):
+              v = os.environ.get(k, "")
+              if not v:
+                  print(f"{k}: <EMPTY>")
+                  continue
+              sha = hashlib.sha256(v.encode()).hexdigest()[:16]
+              print(f"{k}: len={len(v)}  sha256[:16]={sha}  last4=...{v[-4:]}")
+          # 对比 token 内部 ak 和 App Key
+          import base64, json
+          tok = os.environ.get("LONGPORT_ACCESS_TOKEN", "")
+          if tok.startswith("m_"):
+              parts = tok.split(".")
+              payload_b64 = parts[1] + "=" * (-len(parts[1]) % 4)
+              try:
+                  payload = json.loads(base64.urlsafe_b64decode(payload_b64))
+                  print(f"\ntoken.ak = {payload.get('ak')}")
+                  print(f"config ak = {os.environ.get('LONGPORT_APP_KEY')}")
+                  print(f"字符级一致: {payload.get('ak') == os.environ.get('LONGPORT_APP_KEY')}")
+                  print(f"token.aaad = {payload.get('aaad')}")
+                  print(f"token.iks = {payload.get('iks')}")
+                  print(f"token.mid = {payload.get('mid')}")
+                  print(f"token.exp = {payload.get('exp')}")
+              except Exception as e:
+                  print(f"token decode failed: {e}")
+          EOF
+
+      - name: Probe longport OpenAPI with 3 endpoints (override env)
+        env:
+          LONGPORT_HTTP_URL: https://openapi.longportapp.com
+        run: |
+          python3 << 'EOF' 2>&1
+          import os, sys, traceback
+          from longport.openapi import Config, QuoteContext
+          print("\n=== 测试 1: 默认端点 (openapi.longportapp.com) ===")
+          try:
+              cfg = Config.from_env()
+              ctx = QuoteContext(cfg)
+              quotes = ctx.quote(['AAPL.US'])
+              print(f"✅ 成功! quotes={quotes}")
+          except Exception as e:
+              print(f"❌ {type(e).__module__}.{type(e).__name__}: {e}")
+              if hasattr(e, '__dict__'):
+                  for k, v in e.__dict__.items():
+                      print(f"   e.{k} = {v!r}")
+              traceback.print_exc()
+          EOF
+
+      - name: Probe longport OpenAPI minimal (security_list)
+        env:
+          LONGPORT_HTTP_URL: https://openapi.longportapp.com
+        run: |
+          python3 << 'EOF' 2>&1
+          import os, sys, traceback
+          from longport.openapi import Config, QuoteContext, Market, SecurityListCategory
+          print("\n=== 测试 2: security_list(US, Overnight) ===")
+          try:
+              cfg = Config.from_env()
+              ctx = QuoteContext(cfg)
+              securities = ctx.security_list(Market.US, SecurityListCategory.Overnight)
+              print(f"✅ 成功! 共 {len(securities)} 个标的")
+              if securities:
+                  print(f"   前 3 个: {[s.symbol for s in securities[:3]]}")
+          except Exception as e:
+              print(f"❌ {type(e).__module__}.{type(e).__name__}: {e}")
+              if hasattr(e, '__dict__'):
+                  for k, v in e.__dict__.items():
+                      print(f"   e.{k} = {v!r}")
+              traceback.print_exc()
+          EOF
+
+      - name: Probe longport OpenAPI with HTTP override
+        run: |
+          python3 << 'EOF' 2>&1
+          import os, sys, traceback
+          from longport.openapi import Config, QuoteContext
+          for endpoint in [
+              "https://openapi.longportapp.com",
+              "https://openapi.longportapp.cn",
+              "https://openapi.longbridge.com",
+          ]:
+              print(f"\n=== 测试: HTTP 端点 {endpoint} ===")
+              os.environ["LONGPORT_HTTP_URL"] = endpoint
+              try:
+                  cfg = Config.from_env()
+                  ctx = QuoteContext(cfg)
+                  quotes = ctx.quote(['AAPL.US'])
+                  print(f"✅ {endpoint} 成功!")
+              except Exception as e:
+                  print(f"❌ {endpoint} 失败: {e}")
+                  if hasattr(e, '__dict__'):
+                      for k, v in e.__dict__.items():
+                          print(f"   e.{k} = {v!r}")
+          EOF
